@@ -1193,6 +1193,13 @@ request" page). You can see the current settings in the Summary view, see
               Use the `keymaps.popup.perform_action` to merge the MR
               with your message.
 
+On a project with merge trains enabled, the merge goes onto the train instead
+of straight into the target branch, and no separate action or keymap is needed
+for it. {auto_merge} still decides when: false puts the merge request on the
+train right away, true lets it join once the pipeline passes. The merge train
+API takes neither a squash message nor {delete_branch}, so Gitlab uses its own
+defaults for both there.
+
                                                           *gitlab.nvim.rebase*
 gitlab.rebase({opts}) ~
 
