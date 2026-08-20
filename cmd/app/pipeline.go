@@ -30,6 +30,7 @@ type GetPipelineAndJobsResponse struct {
 
 type PipelineManager interface {
 	ListProjectPipelines(pid interface{}, opt *gitlab.ListProjectPipelinesOptions, options ...gitlab.RequestOptionFunc) ([]*gitlab.PipelineInfo, *gitlab.Response, error)
+	GetMergeRequest(pid interface{}, mergeRequest int64, opt *gitlab.GetMergeRequestsOptions, options ...gitlab.RequestOptionFunc) (*gitlab.MergeRequest, *gitlab.Response, error)
 	ListPipelineJobs(pid interface{}, pipelineID int64, opts *gitlab.ListJobsOptions, options ...gitlab.RequestOptionFunc) ([]*gitlab.Job, *gitlab.Response, error)
 	ListPipelineBridges(pid interface{}, pipelineID int64, opts *gitlab.ListJobsOptions, options ...gitlab.RequestOptionFunc) ([]*gitlab.Bridge, *gitlab.Response, error)
 	RetryPipelineBuild(pid interface{}, pipeline int64, options ...gitlab.RequestOptionFunc) (*gitlab.Pipeline, *gitlab.Response, error)
@@ -72,11 +73,49 @@ func (a pipelineService) GetLastPipeline(commit string) (*gitlab.PipelineInfo, e
 		return nil, errors.New("could not get pipelines")
 	}
 
+	// Merged results pipelines run on a merge commit, so none matches the branch head.
 	if len(pipes) == 0 {
-		return nil, errors.New("No pipeline running or available for commit " + commit)
+		return a.getHeadPipeline()
 	}
 
 	return pipes[0], nil
+}
+
+/*
+Gets the merge request's head pipeline, which is empty until a pipeline runs for
+the latest commit.
+*/
+func (a pipelineService) getHeadPipeline() (*gitlab.PipelineInfo, error) {
+
+	mr, res, err := a.client.GetMergeRequest(a.projectInfo.ProjectId, a.projectInfo.MergeId, &gitlab.GetMergeRequestsOptions{})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if res.StatusCode >= 300 {
+		return nil, errors.New("could not get merge request")
+	}
+
+	if mr.HeadPipeline == nil {
+		return nil, errors.New("No pipeline running or available for the merge request")
+	}
+
+	pipe := mr.HeadPipeline
+
+	return &gitlab.PipelineInfo{
+		ID:        pipe.ID,
+		IID:       pipe.IID,
+		ProjectID: pipe.ProjectID,
+		Status:    pipe.Status,
+		Source:    string(pipe.Source),
+		Ref:       pipe.Ref,
+		SHA:       pipe.SHA,
+		Name:      pipe.Name,
+		WebURL:    pipe.WebURL,
+		UpdatedAt: pipe.UpdatedAt,
+		CreatedAt: pipe.CreatedAt,
+	}, nil
 }
 
 /* Gets the latest pipeline and job information for the current branch */
