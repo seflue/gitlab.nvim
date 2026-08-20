@@ -30,6 +30,7 @@ type GetPipelineAndJobsResponse struct {
 
 type PipelineManager interface {
 	ListProjectPipelines(pid interface{}, opt *gitlab.ListProjectPipelinesOptions, options ...gitlab.RequestOptionFunc) ([]*gitlab.PipelineInfo, *gitlab.Response, error)
+	GetMergeRequest(pid interface{}, mergeRequest int64, opt *gitlab.GetMergeRequestsOptions, options ...gitlab.RequestOptionFunc) (*gitlab.MergeRequest, *gitlab.Response, error)
 	ListPipelineJobs(pid interface{}, pipelineID int64, opts *gitlab.ListJobsOptions, options ...gitlab.RequestOptionFunc) ([]*gitlab.Job, *gitlab.Response, error)
 	ListPipelineBridges(pid interface{}, pipelineID int64, opts *gitlab.ListJobsOptions, options ...gitlab.RequestOptionFunc) ([]*gitlab.Bridge, *gitlab.Response, error)
 	RetryPipelineBuild(pid interface{}, pipeline int64, options ...gitlab.RequestOptionFunc) (*gitlab.Pipeline, *gitlab.Response, error)
@@ -73,10 +74,50 @@ func (a pipelineService) GetLastPipeline(commit string) (*gitlab.PipelineInfo, e
 	}
 
 	if len(pipes) == 0 {
-		return nil, errors.New("No pipeline running or available for commit " + commit)
+		return a.getHeadPipeline()
 	}
 
 	return pipes[0], nil
+}
+
+/*
+Gets the pipeline GitLab binds to the head of the merge request. A project with
+merge pipelines runs the pipeline that gates the merge against the merged
+result, whose commit is not the head of the branch, so no pipeline carries that
+SHA. The binding is empty while nothing has run, which a search for the merge
+request's newest pipeline would paper over with a stale one.
+*/
+func (a pipelineService) getHeadPipeline() (*gitlab.PipelineInfo, error) {
+
+	mr, res, err := a.client.GetMergeRequest(a.projectInfo.ProjectId, a.projectInfo.MergeId, &gitlab.GetMergeRequestsOptions{})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if res.StatusCode >= 300 {
+		return nil, errors.New("could not get merge request")
+	}
+
+	if mr.HeadPipeline == nil {
+		return nil, errors.New("No pipeline running or available for the merge request")
+	}
+
+	pipe := mr.HeadPipeline
+
+	return &gitlab.PipelineInfo{
+		ID:        pipe.ID,
+		IID:       pipe.IID,
+		ProjectID: pipe.ProjectID,
+		Status:    pipe.Status,
+		Source:    string(pipe.Source),
+		Ref:       pipe.Ref,
+		SHA:       pipe.SHA,
+		Name:      pipe.Name,
+		WebURL:    pipe.WebURL,
+		UpdatedAt: pipe.UpdatedAt,
+		CreatedAt: pipe.CreatedAt,
+	}, nil
 }
 
 /* Gets the latest pipeline and job information for the current branch */
