@@ -5,14 +5,13 @@ local M = {}
 ---err when unsuccessful.
 ---@alias OnExitCallback fun(result:string?, err:string?)
 
----Run a system command asynchronously.
+---Run a system command asynchronously. The caller reports failures.
 ---@param command string[]
 ---@param on_exit OnExitCallback
 local run_system_async = function(command, on_exit)
   vim.system(command, { text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
-        require("gitlab.utils").notify(result.stderr, vim.log.levels.ERROR)
         on_exit(nil, result.stderr)
       else
         on_exit(vim.fn.trim(result.stdout), nil)
@@ -95,7 +94,12 @@ M.get_ahead_behind = function(current_branch, remote_branch, on_exit)
         end
       )
     elseif err ~= nil then
-      require("gitlab.utils").notify("Error fetching remote-tracking branch: " .. err, vim.log.levels.ERROR)
+      local git = require("gitlab.git")
+      if git.is_missing_remote_ref(err) then
+        git.report_missing_remote_branch(remote_branch)
+      else
+        require("gitlab.utils").notify("Error fetching remote-tracking branch: " .. err, vim.log.levels.ERROR)
+      end
       on_exit(nil, nil, remote_branch)
     end
   end
