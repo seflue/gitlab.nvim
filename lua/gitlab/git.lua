@@ -76,10 +76,38 @@ M.fetch_remote_branch = function(remote_branch)
   end
   local _, fetch_err = run_system({ "git", "fetch", remote, branch })
   if fetch_err ~= nil then
-    require("gitlab.utils").notify("Error fetching remote-tracking branch: " .. fetch_err, vim.log.levels.ERROR)
+    if M.is_missing_remote_ref(fetch_err) then
+      M.report_missing_remote_branch(remote_branch)
+    else
+      require("gitlab.utils").notify("Error fetching remote-tracking branch: " .. fetch_err, vim.log.levels.ERROR)
+    end
     return false
   end
   return true
+end
+
+---Return true if git failed because the branch is gone from the remote.
+---@param err string The stderr of a failed `git fetch`
+---@return boolean
+M.is_missing_remote_ref = function(err)
+  return err:match("couldn't find remote ref") ~= nil
+end
+
+---Explain a branch that has disappeared from the remote. Most Gitlab setups
+---delete the source branch on merge, and the merge request may have been merged
+---long after the plugin last read it, so the state is refetched before judging.
+---@param remote_branch string The remote branch that could not be fetched
+M.report_missing_remote_branch = function(remote_branch)
+  local state = require("gitlab.state")
+  local u = require("gitlab.utils")
+
+  require("gitlab.async").sequence({ u.merge(state.dependencies.info, { refresh = true }) }, function()
+    if state.INFO.state == "merged" or state.INFO.state == "closed" then
+      M.check_mr_in_good_condition()
+    else
+      u.notify(string.format("Branch %s no longer exists on the remote", remote_branch), vim.log.levels.WARN)
+    end
+  end)()
 end
 
 ---Return the number of commits the local branch is ahead of and behind the upstream or

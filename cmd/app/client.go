@@ -16,12 +16,17 @@ import (
 type ProjectInfo struct {
 	ProjectId string
 	MergeId   int64
+	// Merging goes through the merge trains API instead of the merge endpoint,
+	// which refuses with 405 while trains are on. The merge request itself gives
+	// no hint: detailed_merge_status reads "mergeable" either way.
+	MergeTrainsEnabled bool
 }
 
 /* The Client struct embeds all the methods from Gitlab for the different services */
 type Client struct {
 	gitlab.MergeRequestsServiceInterface
 	gitlab.MergeRequestApprovalsServiceInterface
+	gitlab.MergeTrainsServiceInterface
 	gitlab.DiscussionsServiceInterface
 	gitlab.ProjectsServiceInterface
 	gitlab.ProjectMembersServiceInterface
@@ -91,6 +96,7 @@ func NewClient() (*Client, error) {
 	return &Client{
 		client.MergeRequests,
 		client.MergeRequestApprovals,
+		client.MergeTrains,
 		client.Discussions,
 		client.Projects,
 		client.ProjectMembers,
@@ -122,7 +128,8 @@ func InitProjectSettings(c *Client, gitInfo git.GitData) (*ProjectInfo, error) {
 	projectId := fmt.Sprint(project.ID)
 
 	return &ProjectInfo{
-		ProjectId: projectId,
+		ProjectId:          projectId,
+		MergeTrainsEnabled: project.MergeTrainsEnabled,
 	}, nil
 }
 

@@ -16,6 +16,7 @@ type AcceptMergeRequestRequest struct {
 
 type MergeRequestAccepter interface {
 	AcceptMergeRequest(pid interface{}, mergeRequest int64, opt *gitlab.AcceptMergeRequestOptions, options ...gitlab.RequestOptionFunc) (*gitlab.MergeRequest, *gitlab.Response, error)
+	AddMergeRequestToMergeTrain(pid interface{}, mergeRequest int64, opts *gitlab.AddMergeRequestToMergeTrainOptions, options ...gitlab.RequestOptionFunc) ([]*gitlab.MergeTrain, *gitlab.Response, error)
 }
 
 type mergeRequestAccepterService struct {
@@ -27,34 +28,45 @@ type mergeRequestAccepterService struct {
 func (a mergeRequestAccepterService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	payload := r.Context().Value(payload("payload")).(*AcceptMergeRequestRequest)
 
-	opts := gitlab.AcceptMergeRequestOptions{
-		AutoMerge:                &payload.AutoMerge,
-		Squash:                   &payload.Squash,
-		ShouldRemoveSourceBranch: &payload.DeleteBranch,
-	}
+	var res *gitlab.Response
+	var err error
+	var errMessage string
 
-	if payload.SquashMessage != "" {
-		opts.SquashCommitMessage = &payload.SquashMessage
-	}
+	if a.projectInfo.MergeTrainsEnabled {
+		// The merge endpoint answers 405 while trains are on, and neither the
+		// squash message nor the source-branch removal has a counterpart here.
+		opts := gitlab.AddMergeRequestToMergeTrainOptions{
+			AutoMerge: &payload.AutoMerge,
+			Squash:    &payload.Squash,
+		}
+		_, res, err = a.client.AddMergeRequestToMergeTrain(a.projectInfo.ProjectId, a.projectInfo.MergeId, &opts)
+		errMessage = "Could not add MR to the merge train"
+	} else {
+		opts := gitlab.AcceptMergeRequestOptions{
+			AutoMerge:                &payload.AutoMerge,
+			Squash:                   &payload.Squash,
+			ShouldRemoveSourceBranch: &payload.DeleteBranch,
+		}
 
-	_, res, err := a.client.AcceptMergeRequest(a.projectInfo.ProjectId, a.projectInfo.MergeId, &opts)
+		if payload.SquashMessage != "" {
+			opts.SquashCommitMessage = &payload.SquashMessage
+		}
+
+		_, res, err = a.client.AcceptMergeRequest(a.projectInfo.ProjectId, a.projectInfo.MergeId, &opts)
+		errMessage = "Could not merge MR"
+	}
 
 	if err != nil {
-		handleError(w, err, "Could not merge MR", http.StatusInternalServerError)
+		handleError(w, err, errMessage, http.StatusInternalServerError)
 		return
 	}
 
 	if res.StatusCode >= 300 {
-		handleError(w, GenericError{r.URL.Path}, "Could not merge MR", res.StatusCode)
+		handleError(w, GenericError{r.URL.Path}, errMessage, res.StatusCode)
 		return
 	}
 
-	var message string
-	if payload.AutoMerge {
-		message = "MR set to be merged when all checks pass"
-	} else {
-		message = "MR merged successfully"
-	}
+	message := mergeMessage(a.projectInfo.MergeTrainsEnabled, payload.AutoMerge)
 	response := SuccessResponse{Message: message}
 
 	w.WriteHeader(http.StatusOK)
@@ -63,4 +75,19 @@ func (a mergeRequestAccepterService) ServeHTTP(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		handleError(w, err, "Could not encode response", http.StatusInternalServerError)
 	}
+}
+
+func mergeMessage(mergeTrainsEnabled, autoMerge bool) string {
+	if mergeTrainsEnabled {
+		if autoMerge {
+			return "MR joins the merge train when the pipeline passes"
+		}
+		return "MR added to the merge train"
+	}
+
+	if autoMerge {
+		return "MR set to be merged when all checks pass"
+	}
+
+	return "MR merged successfully"
 }

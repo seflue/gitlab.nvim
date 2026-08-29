@@ -73,7 +73,7 @@ end
 ---@generic T
 ---@param dependencies GitlabDependency[]
 ---@param cb fun(argrs: T)
----@return fun(argrs: T)
+---@return fun(argrs?: T)
 M.sequence = function(dependencies, cb)
   return function(args)
     local handler = async:new()
