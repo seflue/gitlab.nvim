@@ -63,10 +63,15 @@ var testProjectData = data{
 }
 
 func getSuccessData(t *testing.T, svc http.Handler, request *http.Request) SuccessResponse {
+	return getSuccessDataAs[SuccessResponse](t, svc, request)
+}
+
+/* Same, for a handler whose response carries more than the message */
+func getSuccessDataAs[T any](t *testing.T, svc http.Handler, request *http.Request) T {
 	res := httptest.NewRecorder()
 	svc.ServeHTTP(res, request)
 
-	var data SuccessResponse
+	var data T
 	err := json.Unmarshal(res.Body.Bytes(), &data)
 	if err != nil {
 		t.Error(err)
